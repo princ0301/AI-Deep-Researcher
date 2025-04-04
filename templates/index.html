@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deep Researcher</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1><i class="fas fa-search"></i> Deep Researcher</h1>
+            <p>Generate comprehensive research summaries using AI and web search</p>
+        </header>
+
+        <main>
+            <section class="research-form">
+                <form id="researchForm">
+                    <div class="input-group">
+                        <label for="research-topic">Research Topic</label>
+                        <input type="text" id="research-topic" placeholder="Enter your research topic..." required>
+                    </div>
+                    <button type="submit" id="submit-btn">
+                        <span>Generate Research</span>
+                        <i class="fas fa-arrow-right"></i>
+                    </button>
+                </form>
+            </section>
+
+            <section class="research-results" id="results-section">
+                <div class="loading" id="loading">
+                    <div class="spinner"></div>
+                    <p>Researching... This may take a minute or two</p>
+                </div>
+
+                <div class="results-container" id="results-container">
+                    <h2>Research Summary</h2>
+                    <div class="summary" id="summary-content"></div>
+                    <div class="sources" id="sources-content"></div>
+                    <button id="copy-btn" class="copy-btn">
+                        <i class="fas fa-copy"></i> Copy to Clipboard
+                    </button>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>Powered by LangGraph and Tavily Search</p>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
