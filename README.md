@@ -12,9 +12,9 @@ A powerful web application that generates comprehensive research summaries by co
 ## 📸 Screenshots
 
 <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
-  <img src="img/screenshot1.png" alt="Home Screen" width="32%"/>
-  <img src="img/screenshot2.png" alt="Research in Progress" width="32%"/>
-  <img src="img/screenshot3.png" alt="Research Results" width="32%"/>
+  <img src="img/img1.png" alt="Home Screen" width="32%"/>
+  <img src="img/img2.png" alt="Research in Progress" width="32%"/>
+  <img src="img/img3.png" alt="Research Results" width="32%"/>
 </div>
 
 ## 🌟 Features
