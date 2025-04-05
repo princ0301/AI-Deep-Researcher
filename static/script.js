@@ -6,6 +6,22 @@ document.addEventListener('DOMContentLoaded', function() {
     const summaryContent = document.getElementById('summary-content');
     const sourcesContent = document.getElementById('sources-content');
     const copyBtn = document.getElementById('copy-btn');
+    
+    // Progress bar elements
+    const progressBarContainer = document.createElement('div');
+    progressBarContainer.className = 'progress-container';
+    
+    const progressBar = document.createElement('div');
+    progressBar.className = 'progress-bar';
+    progressBar.style.width = '0%';
+    
+    const progressText = document.createElement('div');
+    progressText.className = 'progress-text';
+    progressText.textContent = '0%';
+    
+    progressBarContainer.appendChild(progressBar);
+    progressBarContainer.appendChild(progressText);
+    loadingElement.appendChild(progressBarContainer);
 
     // Hide results section initially
     resultsSection.style.display = 'none';
@@ -25,11 +41,16 @@ document.addEventListener('DOMContentLoaded', function() {
         loadingElement.style.display = 'flex';
         resultsContainer.style.display = 'none';
         
+        // Reset progress bar
+        progressBar.style.width = '0%';
+        progressText.textContent = '0%';
+        
         // Scroll to results section
         resultsSection.scrollIntoView({ behavior: 'smooth' });
         
         try {
-            const response = await fetch('/research', {
+            // Start the research process
+            const startResponse = await fetch('/research', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -37,14 +58,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 body: JSON.stringify({ research_topic: researchTopic }),
             });
             
-            const data = await response.json();
+            const startData = await startResponse.json();
             
-            if (!response.ok) {
-                throw new Error(data.error || 'Error generating research');
+            if (!startResponse.ok) {
+                throw new Error(startData.error || 'Error starting research');
             }
             
-            // Process and display the results
-            displayResults(data.summary);
+            const researchId = startData.research_id;
+            
+            // Poll for status updates
+            await pollResearchStatus(researchId);
             
         } catch (error) {
             console.error('Error:', error);
@@ -55,10 +78,67 @@ document.addEventListener('DOMContentLoaded', function() {
                 </div>
             `;
             resultsContainer.style.display = 'block';
-        } finally {
             loadingElement.style.display = 'none';
         }
     });
+    
+    async function pollResearchStatus(researchId) {
+        let complete = false;
+        let attempts = 0;
+        const maxAttempts = 60; // 5 minutes with 5s interval
+        
+        while (!complete && attempts < maxAttempts) {
+            try {
+                const statusResponse = await fetch(`/research/status/${researchId}`);
+                const statusData = await statusResponse.json();
+                
+                if (!statusResponse.ok) {
+                    throw new Error(statusData.error || 'Error checking research status');
+                }
+                
+                // Update progress bar
+                const progress = statusData.progress || 0;
+                progressBar.style.width = `${progress}%`;
+                progressText.textContent = `${progress}%`;
+                
+                if (statusData.status === 'complete') {
+                    // Process and display the results
+                    displayResults(statusData.summary);
+                    complete = true;
+                    break;
+                } else if (statusData.status === 'error') {
+                    throw new Error(statusData.error || 'Error during research');
+                }
+                
+                // Wait before polling again
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                attempts++;
+                
+            } catch (error) {
+                console.error('Error polling status:', error);
+                summaryContent.innerHTML = `
+                    <div class="error-message">
+                        <p><strong>Error:</strong> ${error.message}</p>
+                        <p>Please try again with a different topic or check your connection.</p>
+                    </div>
+                `;
+                resultsContainer.style.display = 'block';
+                loadingElement.style.display = 'none';
+                return;
+            }
+        }
+        
+        if (!complete) {
+            summaryContent.innerHTML = `
+                <div class="error-message">
+                    <p><strong>Error:</strong> Research is taking longer than expected.</p>
+                    <p>Please try again with a more specific topic.</p>
+                </div>
+            `;
+            resultsContainer.style.display = 'block';
+            loadingElement.style.display = 'none';
+        }
+    }
     
     function displayResults(summary) {
         // Split the summary and sources
@@ -99,6 +179,7 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Show results container
         resultsContainer.style.display = 'block';
+        loadingElement.style.display = 'none';
     }
     
     // Copy to clipboard functionality
