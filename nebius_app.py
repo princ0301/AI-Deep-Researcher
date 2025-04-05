@@ -5,11 +5,18 @@ from dataclasses import dataclass, field
 from typing_extensions import TypedDict, Annotated, Literal
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import START, END, StateGraph
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_ollama import ChatOllama
+from langchain_core.messages import HumanMessage, SystemMessage 
 from tavily import TavilyClient
 import os
 from configuration import Configuration 
+from nebius_llm import ChatNebius
+import time
+start_time = time.time()
+
+from dotenv import load_dotenv
+load_dotenv()
+
+TALVIY_API_KEY = os.getenv("TAVILY_API_KEY")
 
 def deduplicate_and_format_sources(search_response, max_tokens_per_source, include_raw_content=True):
     """
@@ -93,6 +100,7 @@ def tavily_search(query, include_raw_content=True, max_results=3):
     try:
         TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
         if not TAVILY_API_KEY: 
+            TAVILY_API_KEY = TALVIY_API_KEY
             print("Warning: Using hardcoded API key. Set TAVILY_API_KEY environment variable.")
             
         tavily_client = TavilyClient(api_key=TAVILY_API_KEY)
@@ -100,11 +108,10 @@ def tavily_search(query, include_raw_content=True, max_results=3):
     except Exception as e:
         print(f"Error in Tavily search: {e}") 
         return {"results": []}
- 
-local_llm = "gemma3:4b" 
 
-llm = ChatOllama(model=local_llm, temperature=0)
-llm_json_mode = ChatOllama(model=local_llm, temperature=0, format="json")
+llm = ChatNebius(model="deepseek-ai/DeepSeek-V3-0324", temperature=0)
+llm_json_mode = ChatNebius(model="deepseek-ai/DeepSeek-V3-0324", temperature=0)
+
 
 @dataclass(kw_only=True)
 class SummaryState:
@@ -245,7 +252,7 @@ def reflect_on_summary(state: SummaryState):
 
         return {"search_query": follow_up_query['follow_up_query']}
     except (json.JSONDecodeError, KeyError) as e:
-        print(f"Error parsing reflection JSON: {e}") 
+        print(f"Error parsing reflection JSON: {e}")
         return {"search_query": f"latest developments about {state.research_topic}"}
 
 def finalize_summary(state: SummaryState):
@@ -260,15 +267,15 @@ def route_research(state: SummaryState, config: RunnableConfig) -> Literal["fina
     except Exception as e:
         print(f"Error loading configuration: {e}") 
         max_loops = 3
-      
+         
     if state.research_loop_count < max_loops:
         return "web_research"
     else:
         return "finalize_summary" 
 
 
-def optimize_tavily_search(query, include_raw_content=True, max_results=3):
-    """Optimized version of tavily_search that retrieves fewer results and limits content size""" 
+def optimize_tavily_search(query, include_raw_content=True, max_results=2):
+    """Optimized version of tavily_search that retrieves fewer results and limits content size"""
     return tavily_search(query, include_raw_content, max_results)
 
 def generate_efficient_query(state: SummaryState):
@@ -321,13 +328,19 @@ def build_graph():
 if __name__ == "__main__":
     try: 
         graph = build_graph()
-        
-        research_input = SummaryStateInput(research_topic="Prime Minister of India")
+         
+        research_input = SummaryStateInput(research_topic="AI in Healthcare")
          
         summary = graph.invoke(research_input)
-         
+       
         print("\n\n===== FINAL SUMMARY =====\n")
         print(summary['running_summary'])
+        
+        end_time = time.time()
+ 
+        total_time = end_time - start_time
+        print("\n")
+        print(f"⏱️ Total time taken to generate summary: {total_time:.2f} seconds")
         
     except Exception as e:
         print(f"Error running research graph: {e}")

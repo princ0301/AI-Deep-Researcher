@@ -1,15 +1,4 @@
 from langsmith import traceable
-import json
-import operator
-from dataclasses import dataclass, field
-from typing_extensions import TypedDict, Annotated, Literal
-from langchain_core.runnables import RunnableConfig
-from langgraph.graph import START, END, StateGraph
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_ollama import ChatOllama
-from tavily import TavilyClient
-import os
-from configuration import Configuration 
 
 def deduplicate_and_format_sources(search_response, max_tokens_per_source, include_raw_content=True):
     """
@@ -72,7 +61,13 @@ def format_sources(search_results):
         f"* {source['title']} : {source['url']}"
         for source in search_results['results']
     )
- 
+
+from tavily import TavilyClient
+
+# Initialize Tavily client with your API key
+TAVILY_API_KEY = "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"
+tavily_client = TavilyClient(api_key=TAVILY_API_KEY)
+
 @traceable
 def tavily_search(query, include_raw_content=True, max_results=3):
     """ Search the web using the Tavily API.
@@ -88,23 +83,23 @@ def tavily_search(query, include_raw_content=True, max_results=3):
                 - title (str): Title of the search result
                 - url (str): URL of the search result
                 - content (str): Snippet/summary of the content
-                - raw_content (str): Full content of the page if available
-    """
-    try:
-        TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
-        if not TAVILY_API_KEY: 
-            print("Warning: Using hardcoded API key. Set TAVILY_API_KEY environment variable.")
-            
-        tavily_client = TavilyClient(api_key=TAVILY_API_KEY)
-        return tavily_client.search(query, max_results=max_results, include_raw_content=include_raw_content)
-    except Exception as e:
-        print(f"Error in Tavily search: {e}") 
-        return {"results": []}
- 
+                - raw_content (str): Full content of the page if available"""
+     
+    return tavily_client.search(query, 
+                         max_results=max_results, 
+                         include_raw_content=include_raw_content)
+
+
+from langchain_ollama import ChatOllama
+
 local_llm = "gemma3:4b" 
 
 llm = ChatOllama(model=local_llm, temperature=0)
 llm_json_mode = ChatOllama(model=local_llm, temperature=0, format="json")
+
+import operator
+from dataclasses import dataclass, field
+from typing_extensions import TypedDict, Annotated, Literal
 
 @dataclass(kw_only=True)
 class SummaryState:
@@ -122,6 +117,12 @@ class SummaryStateInput(TypedDict):
 @dataclass(kw_only=True)
 class SummaryStateOutput(TypedDict):
     running_summary: str = field(default=None)
+
+import json
+from langchain_core.runnables import RunnableConfig
+from langgraph.graph import START, END, StateGraph
+from langchain_core.messages import HumanMessage, SystemMessage
+from configuration import Configuration
 
 query_writer_instructions="""Your goal is to generate targeted web search query.
 
@@ -178,156 +179,85 @@ Return your analysis as a JSON object:
 
 def generate_query(state: SummaryState):
     query_writer_instructions_formatted = query_writer_instructions.format(research_topic=state.research_topic)
-    try:
-        result = llm_json_mode.invoke(
-            [SystemMessage(content=query_writer_instructions_formatted),
-             HumanMessage(content=f"Generate a query for web search:")]
-        )
-        query = json.loads(result.content)
-        
-        return {"search_query": query['query']}
-    except (json.JSONDecodeError, KeyError) as e:
-        print(f"Error parsing query JSON: {e}") 
-        return {"search_query": f"information about {state.research_topic}"}
+    result = llm_json_mode.invoke(
+        [SystemMessage(content=query_writer_instructions_formatted),
+         HumanMessage(content=f"Generate a query for web search:")]
+    )
+    query = json.loads(result.content)
+
+    return {"search_query": query['query']}
 
 def web_research(state: SummaryState):
     search_results = tavily_search(state.search_query, include_raw_content=True, max_results=1)
-     
-    if not search_results or 'results' not in search_results or not search_results['results']:
-        print("Warning: No search results found")
-        search_str = "No search results found. The search may have failed or returned no results."
-        formatted_sources = "No sources available"
-    else:
-        search_str = deduplicate_and_format_sources(search_results, max_tokens_per_source=1000)
-        formatted_sources = format_sources(search_results)
+    search_str = deduplicate_and_format_sources(search_results, max_tokens_per_source=1000)
 
-    return {
-        "sources_gathered": [formatted_sources], 
-        "research_loop_count": state.research_loop_count + 1, 
-        "web_research_results": [search_str]
-    }
+    return {"sources_gathered": [format_sources(search_results)], "research_loop_count": state.research_loop_count + 1, "web_research_results": [search_str]}
 
 def summarize_sources(state: SummaryState):
     existing_summary = state.running_summary
     most_recent_web_research = state.web_research_results[-1]
 
-    try:
-        if existing_summary:
-            human_message_content = (
-                f"Extend the existing summary: {existing_summary}\n\n"
-                f"Include new search results: {most_recent_web_research}\n\n"
-                f"That addresses the following topic: {state.research_topic}"
-            )
-        else:
-            human_message_content = (
-                f"Generate a summary of these search results: {most_recent_web_research}\n\n"
-                f"That addresses the following topic: {state.research_topic}"
-            )
-     
-        result = llm.invoke(
-            [SystemMessage(content=summarizer_instructions),
-            HumanMessage(content=human_message_content)]
+    if existing_summary:
+        human_message_content = (
+            f"Extend the existing summary: {existing_summary}\n\n"
+            f"Include new search results: {most_recent_web_research}"
+            f"That addresses the following topic: {state.research_topic}"
         )
+    else:
+        human_message_content = (
+            f"Generate a summary of these search results: {most_recent_web_research} "
+            f"That addresses the following topic: {state.research_topic}"
+        )
+ 
+    result = llm.invoke(
+        [SystemMessage(content=summarizer_instructions),
+        HumanMessage(content=human_message_content)]
+    )
 
-        running_summary = result.content
-        return {"running_summary": running_summary}
-    except Exception as e:
-        print(f"Error in summarizing sources: {e}") 
-        return {"running_summary": f"Error generating summary for {state.research_topic}."}
+    running_summary = result.content
+    return {"running_summary": running_summary}
 
 def reflect_on_summary(state: SummaryState):
-    try:
-        result = llm_json_mode.invoke(
-            [SystemMessage(content=reflection_instructions.format(research_topic=state.research_topic)),
-            HumanMessage(content=f"Identify a knowledge gap and generate a follow-up web search query based on our existing knowledge: {state.running_summary}")]
-        )   
-        follow_up_query = json.loads(result.content)
+    result = llm_json_mode.invoke(
+        [SystemMessage(content=reflection_instructions.format(research_topic=state.research_topic)),
+        HumanMessage(content=f"Identify a knowledge gap and generate a follow-up web search query based on our existing knowledge: {state.running_summary}")]
+    )   
+    follow_up_query = json.loads(result.content)
 
-        return {"search_query": follow_up_query['follow_up_query']}
-    except (json.JSONDecodeError, KeyError) as e:
-        print(f"Error parsing reflection JSON: {e}") 
-        return {"search_query": f"latest developments about {state.research_topic}"}
+    return {"search_query": follow_up_query['follow_up_query']}
 
 def finalize_summary(state: SummaryState):
     all_sources = "\n".join(source for source in state.sources_gathered)
-    final_summary = f"## Summary\n\n{state.running_summary}\n\n### Sources:\n{all_sources}"
-    return {"running_summary": final_summary}
+    state.running_summary = f"## Summary\n\n{state.running_summary}\n\n ### Sources:\n{all_sources}"
+    return {"running_summary": state.running_summary}
 
 def route_research(state: SummaryState, config: RunnableConfig) -> Literal["finalize_summary", "web_research"]:
-    try:
-        configurable = Configuration.from_runnable_config(config)
-        max_loops = configurable.max_web_research_loops
-    except Exception as e:
-        print(f"Error loading configuration: {e}") 
-        max_loops = 3
-      
-    if state.research_loop_count < max_loops:
+    configurable = Configuration.from_runnable_config(config)
+    if state.research_loop_count <= configurable.max_web_research_loops:
         return "web_research"
     else:
         return "finalize_summary" 
-
-
-def optimize_tavily_search(query, include_raw_content=True, max_results=3):
-    """Optimized version of tavily_search that retrieves fewer results and limits content size""" 
-    return tavily_search(query, include_raw_content, max_results)
-
-def generate_efficient_query(state: SummaryState):
-    """More efficient query generation that focuses on precision""" 
-    query_writer_efficient_instructions = """Your goal is to generate a highly focused and specific web search query.
-    The query should be concise (10 words or less) and target the most relevant information related to the topic.
     
-    Topic:
-    {research_topic}
-    
-    Return your query as a JSON object:
-    {{
-        "query": "string",
-        "aspect": "string",
-        "rationale": "string"
-    }}
-    """
-    
-    query_writer_instructions_formatted = query_writer_efficient_instructions.format(research_topic=state.research_topic)
-    try:
-        result = llm_json_mode.invoke(
-            [SystemMessage(content=query_writer_instructions_formatted),
-             HumanMessage(content=f"Generate a query for web search:")]
-        )
-        query = json.loads(result.content)
-        
-        return {"search_query": query['query']}
-    except (json.JSONDecodeError, KeyError) as e:
-        print(f"Error parsing query JSON: {e}") 
-        return {"search_query": f"information about {state.research_topic}"}
+builder = StateGraph(SummaryState, input=SummaryStateInput, output=SummaryStateOutput, config_schema=Configuration)
+builder.add_node("generate_query", generate_query)
+builder.add_node("web_research", web_research)
+builder.add_node("summarize_sources", summarize_sources)
+builder.add_node("reflect_on_summary", reflect_on_summary)
+builder.add_node("finalize_summary", finalize_summary)
 
- 
-def build_graph():
-    builder = StateGraph(SummaryState, input=SummaryStateInput, output=SummaryStateOutput, config_schema=Configuration)
-    builder.add_node("generate_query", generate_query)
-    builder.add_node("web_research", web_research)
-    builder.add_node("summarize_sources", summarize_sources)
-    builder.add_node("reflect_on_summary", reflect_on_summary)
-    builder.add_node("finalize_summary", finalize_summary)
+builder.add_edge(START, "generate_query")
+builder.add_edge("generate_query", "web_research")
+builder.add_edge("web_research", "summarize_sources")
+builder.add_edge("summarize_sources", "reflect_on_summary")
+builder.add_conditional_edges("reflect_on_summary", route_research)
+builder.add_edge("finalize_summary", END)
 
-    builder.add_edge(START, "generate_query")
-    builder.add_edge("generate_query", "web_research")
-    builder.add_edge("web_research", "summarize_sources")
-    builder.add_edge("summarize_sources", "reflect_on_summary")
-    builder.add_conditional_edges("reflect_on_summary", route_research)
-    builder.add_edge("finalize_summary", END)
+graph = builder.compile()
 
-    return builder.compile()
 
-if __name__ == "__main__":
-    try: 
-        graph = build_graph()
-        
-        research_input = SummaryStateInput(research_topic="Prime Minister of India")
-         
-        summary = graph.invoke(research_input)
-         
-        print("\n\n===== FINAL SUMMARY =====\n")
-        print(summary['running_summary'])
-        
-    except Exception as e:
-        print(f"Error running research graph: {e}")
+# research_input = SummaryStateInput(
+#     research_topic="Prime minister of India"
+# )
+# summary = graph.invoke(research_input) 
+# from IPython.display import Markdown
+# Markdown(summary['running_summary'])

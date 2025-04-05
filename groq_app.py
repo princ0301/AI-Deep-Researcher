@@ -5,11 +5,17 @@ from dataclasses import dataclass, field
 from typing_extensions import TypedDict, Annotated, Literal
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import START, END, StateGraph
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_ollama import ChatOllama
+from langchain_core.messages import HumanMessage, SystemMessage 
+from langchain_groq import ChatGroq
 from tavily import TavilyClient
 import os
-from configuration import Configuration 
+from configuration import Configuration  
+
+import time
+start_time = time.time()
+
+from dotenv import load_dotenv
+load_dotenv()
 
 def deduplicate_and_format_sources(search_response, max_tokens_per_source, include_raw_content=True):
     """
@@ -92,7 +98,7 @@ def tavily_search(query, include_raw_content=True, max_results=3):
     """
     try:
         TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
-        if not TAVILY_API_KEY: 
+        if not TAVILY_API_KEY:  
             print("Warning: Using hardcoded API key. Set TAVILY_API_KEY environment variable.")
             
         tavily_client = TavilyClient(api_key=TAVILY_API_KEY)
@@ -100,11 +106,13 @@ def tavily_search(query, include_raw_content=True, max_results=3):
     except Exception as e:
         print(f"Error in Tavily search: {e}") 
         return {"results": []}
- 
-local_llm = "gemma3:4b" 
 
-llm = ChatOllama(model=local_llm, temperature=0)
-llm_json_mode = ChatOllama(model=local_llm, temperature=0, format="json")
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY") 
+local_llm = "mistral-saba-24b" 
+
+llm = ChatGroq(model=local_llm, temperature=0, groq_api_key=GROQ_API_KEY)
+llm_json_mode = ChatGroq(model=local_llm, temperature=0, groq_api_key=GROQ_API_KEY, model_kwargs={"response_format": {"type": "json_object"}})
 
 @dataclass(kw_only=True)
 class SummaryState:
@@ -260,7 +268,7 @@ def route_research(state: SummaryState, config: RunnableConfig) -> Literal["fina
     except Exception as e:
         print(f"Error loading configuration: {e}") 
         max_loops = 3
-      
+     
     if state.research_loop_count < max_loops:
         return "web_research"
     else:
@@ -300,7 +308,6 @@ def generate_efficient_query(state: SummaryState):
         print(f"Error parsing query JSON: {e}") 
         return {"search_query": f"information about {state.research_topic}"}
 
- 
 def build_graph():
     builder = StateGraph(SummaryState, input=SummaryStateInput, output=SummaryStateOutput, config_schema=Configuration)
     builder.add_node("generate_query", generate_query)
@@ -321,13 +328,20 @@ def build_graph():
 if __name__ == "__main__":
     try: 
         graph = build_graph()
-        
-        research_input = SummaryStateInput(research_topic="Prime Minister of India")
+         
+        research_input = SummaryStateInput(research_topic="Edication System in India vs America")
          
         summary = graph.invoke(research_input)
          
         print("\n\n===== FINAL SUMMARY =====\n")
         print(summary['running_summary'])
+
+        end_time = time.time()
+ 
+        total_time = end_time - start_time
+        print("\n")
+        print(f"⏱️ Total time taken to generate summary: {total_time:.2f} seconds")
+        
         
     except Exception as e:
         print(f"Error running research graph: {e}")

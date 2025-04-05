@@ -5,11 +5,17 @@ from dataclasses import dataclass, field
 from typing_extensions import TypedDict, Annotated, Literal
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import START, END, StateGraph
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_ollama import ChatOllama
+from langchain_core.messages import HumanMessage, SystemMessage 
+from langchain_google_genai import ChatGoogleGenerativeAI
 from tavily import TavilyClient
 import os
-from configuration import Configuration 
+from configuration import Configuration
+
+import time
+start_time = time.time()
+
+from dotenv import load_dotenv
+load_dotenv() 
 
 def deduplicate_and_format_sources(search_response, max_tokens_per_source, include_raw_content=True):
     """
@@ -92,7 +98,7 @@ def tavily_search(query, include_raw_content=True, max_results=3):
     """
     try:
         TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
-        if not TAVILY_API_KEY: 
+        if not TAVILY_API_KEY:  
             print("Warning: Using hardcoded API key. Set TAVILY_API_KEY environment variable.")
             
         tavily_client = TavilyClient(api_key=TAVILY_API_KEY)
@@ -101,10 +107,10 @@ def tavily_search(query, include_raw_content=True, max_results=3):
         print(f"Error in Tavily search: {e}") 
         return {"results": []}
  
-local_llm = "gemma3:4b" 
+local_llm = "gemini-1.5-pro" 
 
-llm = ChatOllama(model=local_llm, temperature=0)
-llm_json_mode = ChatOllama(model=local_llm, temperature=0, format="json")
+llm = ChatGoogleGenerativeAI(model=local_llm, temperature=0)
+llm_json_mode = ChatGoogleGenerativeAI(model=local_llm, temperature=0, format="json")
 
 @dataclass(kw_only=True)
 class SummaryState:
@@ -192,7 +198,7 @@ def generate_query(state: SummaryState):
 
 def web_research(state: SummaryState):
     search_results = tavily_search(state.search_query, include_raw_content=True, max_results=1)
-     
+      
     if not search_results or 'results' not in search_results or not search_results['results']:
         print("Warning: No search results found")
         search_str = "No search results found. The search may have failed or returned no results."
@@ -300,7 +306,6 @@ def generate_efficient_query(state: SummaryState):
         print(f"Error parsing query JSON: {e}") 
         return {"search_query": f"information about {state.research_topic}"}
 
- 
 def build_graph():
     builder = StateGraph(SummaryState, input=SummaryStateInput, output=SummaryStateOutput, config_schema=Configuration)
     builder.add_node("generate_query", generate_query)
@@ -321,13 +326,19 @@ def build_graph():
 if __name__ == "__main__":
     try: 
         graph = build_graph()
-        
-        research_input = SummaryStateInput(research_topic="Prime Minister of India")
+         
+        research_input = SummaryStateInput(research_topic="AI in Healthcare")
          
         summary = graph.invoke(research_input)
          
         print("\n\n===== FINAL SUMMARY =====\n")
         print(summary['running_summary'])
+
+        end_time = time.time()
+ 
+        total_time = end_time - start_time
+        print("\n")
+        print(f"⏱️ Total time taken to generate summary: {total_time:.2f} seconds")
         
     except Exception as e:
         print(f"Error running research graph: {e}")
