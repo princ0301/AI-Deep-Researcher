@@ -1,4 +1,5 @@
 streamlit 
+flask
 langgraph 
 langchain 
 langchain-core 
